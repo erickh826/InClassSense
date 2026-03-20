@@ -1,30 +1,30 @@
 import type { SessionPayload } from '../modules/engagement/types';
+import type { ModeConfig } from '../config/types';
 
-const SYSTEM_PROMPT = `
-你是一位具備教育心理學背景的幼兒教育專家。
-根據以下的【多模態對話紀錄】與【非語言統計數據】,
-撰寫一份給老師的兒童發展觀察報告，使用 Markdown 格式，
-嚴格包含以下三個段落：
-1. 語言溝通能力評估（詞彙量、句型、理解力、表達流暢度）
-2. 情緒投入度評估（專注度、表情時機、遇困難時的情緒反應）
-3. 建議觀察重點（具體給老師的下次引導方向）
-`.trim();
-
-function buildUserPrompt(payload: SessionPayload): string {
-  return `
-【統計數據】
-${JSON.stringify(payload.engagement_stats, null, 2)}
-
-【多模態對話紀錄（含當下表情）】
-${JSON.stringify(payload.multimodal_transcript, null, 2)}
-`.trim();
+/**
+ * Resolves the system prompt for a given config + active variant key.
+ */
+function resolveSystemPrompt(config: ModeConfig, variantKey?: string): string {
+  if (config.variants && config.variants.length > 0) {
+    const variant = config.variants.find((v) => v.key === variantKey) ?? config.variants[0];
+    return variant!.systemPrompt;
+  }
+  return config.defaultSystemPrompt ?? '';
 }
 
 /**
- * Calls the LLM endpoint (proxied through Vite dev server at /api)
- * to generate a teacher observation report in Markdown.
+ * Calls the LLM endpoint (proxied via Vercel serverless function at /api/chat)
+ * using the mode config to build the prompt.
  */
-export async function generateReport(payload: SessionPayload): Promise<string> {
+export async function generateReport(
+  payload: SessionPayload,
+  config: ModeConfig,
+  extras: Record<string, string> = {},
+  variantKey?: string,
+): Promise<string> {
+  const systemPrompt = resolveSystemPrompt(config, variantKey);
+  const userPrompt = config.buildUserPrompt(payload, extras);
+
   const response = await fetch('/api/chat', {
     method: 'POST',
     headers: {
@@ -32,8 +32,8 @@ export async function generateReport(payload: SessionPayload): Promise<string> {
     },
     body: JSON.stringify({
       messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: buildUserPrompt(payload) },
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
       ],
       temperature: 0.7,
       max_tokens: 2000,
