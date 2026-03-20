@@ -1,9 +1,4 @@
-// Static top-level imports — Vite bundles these at build time into the worker chunk.
-// This avoids runtime dynamic import() calls which fail on Android Chrome WebView
-// with "self.import is not a function".
-import * as faceapi from 'face-api.js';
-import { FaceLandmarker, FilesetResolver } from '@mediapipe/tasks-vision';
-
+import type { FaceLandmarker } from '@mediapipe/tasks-vision';
 import type { EmotionTag } from '../engagement/types';
 import type {
   VisionWorkerRequest,
@@ -11,10 +6,60 @@ import type {
   EngagementFrame,
 } from '../engagement/types';
 
+// MediaPipe's `ta()` tries importScripts(), then `self.import()` for Emscripten glue (`*_internal.js`).
+// 1) `self.import` is not a browser API — we polyfill it.
+// 2) Real `import()` loads that file as an ES module, so `var ModuleFactory` never hits `self`
+//    → "ModuleFactory not set." Fetch + indirect eval runs it like a classic script (same as importScripts).
+function isMediapipeWasmLoaderScript(url: string): boolean {
+  try {
+    const pathname = new URL(url, self.location?.href ?? undefined).pathname;
+    return /\/[^/]+_internal\.js$/i.test(pathname);
+  } catch {
+    return url.includes('_internal.js');
+  }
+}
+
+/** Allowlist of trusted origins for MediaPipe WASM loader scripts */
+const TRUSTED_MEDIAPIPE_ORIGINS = new Set([
+  'https://cdn.jsdelivr.net',
+  'https://storage.googleapis.com',
+]);
+
+async function loadScriptLikeImportScripts(url: string): Promise<void> {
+  let origin: string;
+  try {
+    origin = new URL(url).origin;
+  } catch {
+    throw new Error(`Invalid URL for WASM loader: ${url}`);
+  }
+  if (!TRUSTED_MEDIAPIPE_ORIGINS.has(origin)) {
+    throw new Error(`Untrusted origin for WASM loader script: ${origin}`);
+  }
+  const res = await fetch(url, { mode: 'cors', credentials: 'omit' });
+  if (!res.ok) {
+    throw new Error(`Failed to load ${url}: ${res.status} ${res.statusText}`);
+  }
+  const code = await res.text();
+  (0, eval)(code);
+}
+
+const w = self as typeof self & { import?: (specifier: string) => Promise<unknown> };
+if (typeof w.import !== 'function') {
+  w.import = async (specifier: string) => {
+    if (isMediapipeWasmLoaderScript(specifier)) {
+      await loadScriptLikeImportScripts(specifier);
+      return;
+    }
+    return import(/* @vite-ignore */ specifier);
+  };
+}
+
 // ─── MediaPipe Face Landmarker ────────────────────────────
+// Imported at runtime inside the worker context
 let faceLandmarker: FaceLandmarker | null = null;
 
 // ─── face-api.js ──────────────────────────────────────────
+// face-api.js works with OffscreenCanvas in modern browsers
 let faceApiReady = false;
 
 /**
@@ -43,7 +88,7 @@ function mapExpression(expressions: Record<string, number>): EmotionTag {
   }
 }
 
-// ─── Head pose attention ──────────────────────────────────
+// ─── Head pose attention (same logic as spec) ─────────────
 function isLookingAtScreen(landmarks: Array<{ x: number; y: number; z: number }>): boolean {
   const nose = landmarks[1];
   const leftEar = landmarks[93];
@@ -51,7 +96,7 @@ function isLookingAtScreen(landmarks: Array<{ x: number; y: number; z: number }>
   if (!nose || !leftEar || !rightEar) return false;
 
   const faceWidth = Math.abs(rightEar.x - leftEar.x);
-  if (faceWidth < 0.001) return false;
+  if (faceWidth < 0.001) return false; // avoid division by near-zero
   const noseOffset = nose.x - (leftEar.x + rightEar.x) / 2;
   const yawRatio = noseOffset / faceWidth;
   return Math.abs(yawRatio) < 0.3;
@@ -60,6 +105,9 @@ function isLookingAtScreen(landmarks: Array<{ x: number; y: number; z: number }>
 // ─── Initialisation ───────────────────────────────────────
 async function init() {
   // MediaPipe Face Landmarker
+  const vision = await import('@mediapipe/tasks-vision');
+  const { FaceLandmarker, FilesetResolver } = vision;
+
   const filesetResolver = await FilesetResolver.forVisionTasks(
     'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm',
   );
@@ -76,8 +124,11 @@ async function init() {
     outputFacialTransformationMatrixes: false,
   });
 
-  // face-api.js — load models from /models (served from public/models/)
+  // face-api.js — load models from /public/models/
+  // Note: face-api.js needs to be loaded via importScripts or dynamic import
+  // depending on build. For Vite worker with ES modules:
   try {
+    const faceapi = await import('face-api.js');
     const modelPath = '/models';
     await Promise.all([
       faceapi.nets.tinyFaceDetector.loadFromUri(modelPath),
@@ -111,12 +162,13 @@ async function processFrame(
   // 2) face-api.js emotion
   if (faceApiReady && isPresent) {
     try {
+      const faceapi = await import('face-api.js');
       const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
       const ctx = canvas.getContext('2d');
       if (ctx) {
         ctx.drawImage(bitmap, 0, 0);
         const detection = await faceapi
-          .detectSingleFace(canvas as unknown as HTMLCanvasElement, new faceapi.TinyFaceDetectorOptions())
+          .detectSingleFace(canvas as any, new faceapi.TinyFaceDetectorOptions())
           .withFaceExpressions();
         if (detection) {
           emotion = mapExpression(detection.expressions as unknown as Record<string, number>);
