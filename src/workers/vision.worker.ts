@@ -5,6 +5,39 @@ import type {
   EngagementFrame,
 } from '../engagement/types';
 
+// MediaPipe's `ta()` tries importScripts(), then `self.import()` for Emscripten glue (`*_internal.js`).
+// 1) `self.import` is not a browser API — we polyfill it.
+// 2) Real `import()` loads that file as an ES module, so `var ModuleFactory` never hits `self`
+//    → "ModuleFactory not set." Fetch + indirect eval runs it like a classic script (same as importScripts).
+function isMediapipeWasmLoaderScript(url: string): boolean {
+  try {
+    const pathname = new URL(url, self.location?.href ?? undefined).pathname;
+    return /\/[^/]+_internal\.js$/i.test(pathname);
+  } catch {
+    return url.includes('_internal.js');
+  }
+}
+
+async function loadScriptLikeImportScripts(url: string): Promise<void> {
+  const res = await fetch(url, { mode: 'cors', credentials: 'omit' });
+  if (!res.ok) {
+    throw new Error(`Failed to load ${url}: ${res.status} ${res.statusText}`);
+  }
+  const code = await res.text();
+  (0, eval)(code);
+}
+
+const w = self as typeof self & { import?: (specifier: string) => Promise<unknown> };
+if (typeof w.import !== 'function') {
+  w.import = async (specifier: string) => {
+    if (isMediapipeWasmLoaderScript(specifier)) {
+      await loadScriptLikeImportScripts(specifier);
+      return;
+    }
+    return import(/* @vite-ignore */ specifier);
+  };
+}
+
 // ─── MediaPipe Face Landmarker ────────────────────────────
 // Imported at runtime inside the worker context
 let faceLandmarker: any = null;
