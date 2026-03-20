@@ -3,9 +3,28 @@ import { EngagementTracker } from '../modules/engagement/EngagementTracker';
 import { generateReport } from '../api/reportGenerator';
 import { PrivacyBadge } from './PrivacyBadge';
 import { ReportView } from './ReportView';
-import type { Utterance, EngagementFrame, SessionPayload } from '../modules/engagement/types';
+import type { Utterance, EngagementFrame, SessionPayload, EmotionTag } from '../modules/engagement/types';
 
 type SessionState = 'idle' | 'running' | 'generating' | 'done';
+type FacingMode = 'user' | 'environment';
+
+/** Human-readable labels for emotion tags shown in the transcript */
+const EMOTION_LABEL: Record<EmotionTag, string> = {
+  happy:     '😊 開心',
+  confused:  '😕 困惑',
+  surprised: '😮 驚訝',
+  neutral:   '😐 平靜',
+  absent:    '👤 未偵測到臉部',  // face not detected by camera — not an emotional state
+};
+
+/** Shorter label for the live indicator below the video */
+const EMOTION_LIVE_LABEL: Record<EmotionTag, string> = {
+  happy:     '😊 開心',
+  confused:  '😕 困惑',
+  surprised: '😮 驚訝',
+  neutral:   '😐 平靜',
+  absent:    '👤 臉部未入鏡',
+};
 
 export function SessionPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -18,6 +37,7 @@ export function SessionPage() {
   const [report, setReport] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [topic, setTopic] = useState('');
+  const [facingMode, setFacingMode] = useState<FacingMode>('user');
 
   const handleStart = useCallback(async () => {
     if (!videoRef.current) return;
@@ -30,6 +50,7 @@ export function SessionPage() {
       onInterim: (text) => setInterim(text),
       onFrame: (frame) => setLatestFrame(frame),
       onError: (err) => setError(err),
+      facingMode,
     });
 
     trackerRef.current = tracker;
@@ -40,7 +61,7 @@ export function SessionPage() {
     } catch (err) {
       setError(`啟動失敗: ${err}`);
     }
-  }, []);
+  }, [facingMode]);
 
   const handleStop = useCallback(async () => {
     const tracker = trackerRef.current;
@@ -51,10 +72,8 @@ export function SessionPage() {
     trackerRef.current = null;
     setInterim('');
 
-    // Update transcript with synced emotions
     setTranscript(payload.multimodal_transcript);
 
-    // Generate report
     setState('generating');
     try {
       const md = await generateReport(payload);
@@ -88,11 +107,21 @@ export function SessionPage() {
       />
 
       {/* Controls */}
-      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
         {state === 'idle' && (
-          <button onClick={handleStart} style={btnStyle('#1976d2')}>
-            ▶ 開始觀察
-          </button>
+          <>
+            <button onClick={handleStart} style={btnStyle('#1976d2')}>
+              ▶ 開始觀察
+            </button>
+            {/* Camera toggle — only relevant before starting */}
+            <button
+              onClick={() => setFacingMode((m) => m === 'user' ? 'environment' : 'user')}
+              title={facingMode === 'user' ? '目前：前置鏡頭（點擊切換至後置）' : '目前：後置鏡頭（點擊切換至前置）'}
+              style={btnStyle('#546e7a')}
+            >
+              {facingMode === 'user' ? '🤳 前置鏡頭' : '📷 後置鏡頭'}
+            </button>
+          </>
         )}
         {state === 'running' && (
           <button onClick={handleStop} style={btnStyle('#d32f2f')}>
@@ -116,12 +145,14 @@ export function SessionPage() {
               borderRadius: '12px',
               backgroundColor: '#000',
               display: cameraActive ? 'block' : 'none',
+              // Mirror front camera so it feels like a selfie view
+              transform: facingMode === 'user' ? 'scaleX(-1)' : 'none',
             }}
           />
           {latestFrame && cameraActive && (
             <div style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
-              👁 注視螢幕: {latestFrame.is_looking_at_screen ? '是' : '否'} |
-              😊 表情: {latestFrame.emotion}
+              👁 注視螢幕: {latestFrame.is_looking_at_screen ? '是' : '否'} |{' '}
+              {EMOTION_LIVE_LABEL[latestFrame.emotion]}
             </div>
           )}
         </div>
@@ -148,7 +179,7 @@ export function SessionPage() {
               {u.emotion_context && (
                 <span style={{ color: '#888', fontSize: '12px' }}>
                   {' '}
-                  ({u.emotion_context})
+                  ({EMOTION_LABEL[u.emotion_context]})
                 </span>
               )}
             </div>

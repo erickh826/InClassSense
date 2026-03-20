@@ -15,6 +15,8 @@ export interface EngagementTrackerEvents {
   onInterim?: (text: string) => void;
   onFrame?: (frame: EngagementFrame) => void;
   onError?: (error: string) => void;
+  /** 'user' = front/selfie camera (default), 'environment' = back camera */
+  facingMode?: 'user' | 'environment';
 }
 
 /**
@@ -51,11 +53,11 @@ export class EngagementTracker {
 
   async start(videoElement: HTMLVideoElement): Promise<void> {
     // 1) Camera permission
-    // Try front camera first; fall back to any available camera (handles Android devices
-    // where facingMode: 'user' throws NotFoundError if the front camera is unavailable)
+    // Try requested facingMode first; fall back to any camera if not found.
+    const facingMode = this.events.facingMode ?? 'user';
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+        video: { facingMode, width: { ideal: 640 }, height: { ideal: 480 } },
         audio: false,
       });
     } catch {

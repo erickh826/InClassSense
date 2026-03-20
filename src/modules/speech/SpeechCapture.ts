@@ -10,11 +10,13 @@ export type SpeechCaptureEvents = {
  * Wraps the Web Speech API (SpeechRecognition).
  * Emits finalised Utterance objects with MM:SS timestamps relative to session start.
  *
- * Android Chrome behaviour:
- * - Ignores continuous: true — stops after each utterance or ~5s silence
- * - Silently freezes if you call .start() on the same instance too many times
+ * Cross-browser quirks handled:
+ * - Android Chrome: ignores continuous:true, stops after each utterance → restart via onend
+ * - Safari/macOS: continuous:true can stall after the first result; onspeechend never fires.
+ *   Fix: restart on both onend AND a watchdog timer that detects silence > 6s.
  *
- * Fix: create a brand-new SpeechRecognition instance on every restart cycle.
+ * Key insight: always create a FRESH SpeechRecognition instance on each restart —
+ * reusing the same object causes silent freezes on Android and Safari.
  */
 export class SpeechCapture {
   private recognition: SpeechRecognition | null = null;
@@ -22,6 +24,11 @@ export class SpeechCapture {
   private events: SpeechCaptureEvents;
   private running = false;
   private SpeechRecognitionCtor: SpeechRecognitionConstructor | null = null;
+
+  // Watchdog: if no onresult/onend fires within this window, force-restart.
+  // Safari stalls silently; this detects and recovers from it.
+  private watchdogTimer: ReturnType<typeof setTimeout> | null = null;
+  private static readonly WATCHDOG_MS = 6000;
 
   constructor(events: SpeechCaptureEvents) {
     this.events = events;
@@ -43,8 +50,9 @@ export class SpeechCapture {
   }
 
   stop(): void {
-    // Set running = false FIRST so the onend callback won't restart
+    // Set running = false FIRST so watchdog / onend callbacks won't restart
     this.running = false;
+    this.clearWatchdog();
     try {
       this.recognition?.stop();
     } catch {
@@ -55,9 +63,7 @@ export class SpeechCapture {
 
   /**
    * Creates a fresh SpeechRecognition instance and starts it.
-   * Called on initial start and on every restart after onend fires.
-   * A fresh instance avoids Android Chrome silently freezing on
-   * repeated .start() calls to the same object.
+   * Called on initial start and on every restart.
    */
   private createAndStart(): void {
     if (!this.running || !this.SpeechRecognitionCtor) return;
@@ -69,6 +75,9 @@ export class SpeechCapture {
     recognition.maxAlternatives = 1;
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
+      // Reset watchdog on any activity
+      this.resetWatchdog();
+
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
         if (!result?.[0]) continue;
@@ -89,24 +98,22 @@ export class SpeechCapture {
     };
 
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-      // 'no-speech' and 'aborted' are normal — Android fires these constantly.
-      // The onend handler below will restart with a fresh instance.
+      // These are normal — browser stops after silence or on manual stop.
+      // onend will handle restart.
       const ignorable = ['no-speech', 'aborted'];
       if (!ignorable.includes(event.error)) {
         this.events.onError(`SpeechRecognition error: ${event.error}`);
       }
     };
 
-    // On every stop/end: discard this instance, create a fresh one after a
-    // short delay. The 300ms gap prevents a tight restart loop on Android
-    // and ensures the previous mic lock is released before re-acquiring.
+    // On every stop: discard this instance, schedule a fresh one.
+    // 300ms gap ensures the mic lock is released before re-acquiring.
     recognition.onend = () => {
+      this.clearWatchdog();
       this.recognition = null;
       if (this.running) {
         setTimeout(() => {
-          if (this.running) {
-            this.createAndStart();
-          }
+          if (this.running) this.createAndStart();
         }, 300);
       }
     };
@@ -115,12 +122,36 @@ export class SpeechCapture {
 
     try {
       recognition.start();
+      // Start watchdog after launching — if nothing fires in WATCHDOG_MS,
+      // force-restart (catches Safari's silent stall after first utterance)
+      this.resetWatchdog();
     } catch {
-      // Unexpected start error — retry after a delay
       this.recognition = null;
       setTimeout(() => {
         if (this.running) this.createAndStart();
       }, 500);
+    }
+  }
+
+  private resetWatchdog(): void {
+    this.clearWatchdog();
+    this.watchdogTimer = setTimeout(() => {
+      if (!this.running) return;
+      // Force stop — onend will trigger createAndStart()
+      try {
+        this.recognition?.stop();
+      } catch {
+        // If stop() fails, restart directly
+        this.recognition = null;
+        this.createAndStart();
+      }
+    }, SpeechCapture.WATCHDOG_MS);
+  }
+
+  private clearWatchdog(): void {
+    if (this.watchdogTimer !== null) {
+      clearTimeout(this.watchdogTimer);
+      this.watchdogTimer = null;
     }
   }
 
