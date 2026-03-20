@@ -1,3 +1,9 @@
+// Static top-level imports — Vite bundles these at build time into the worker chunk.
+// This avoids runtime dynamic import() calls which fail on Android Chrome WebView
+// with "self.import is not a function".
+import * as faceapi from 'face-api.js';
+import { FaceLandmarker, FilesetResolver } from '@mediapipe/tasks-vision';
+
 import type { EmotionTag } from '../engagement/types';
 import type {
   VisionWorkerRequest,
@@ -6,11 +12,9 @@ import type {
 } from '../engagement/types';
 
 // ─── MediaPipe Face Landmarker ────────────────────────────
-// Imported at runtime inside the worker context
-let faceLandmarker: any = null;
+let faceLandmarker: FaceLandmarker | null = null;
 
 // ─── face-api.js ──────────────────────────────────────────
-// face-api.js works with OffscreenCanvas in modern browsers
 let faceApiReady = false;
 
 /**
@@ -39,7 +43,7 @@ function mapExpression(expressions: Record<string, number>): EmotionTag {
   }
 }
 
-// ─── Head pose attention (same logic as spec) ─────────────
+// ─── Head pose attention ──────────────────────────────────
 function isLookingAtScreen(landmarks: Array<{ x: number; y: number; z: number }>): boolean {
   const nose = landmarks[1];
   const leftEar = landmarks[93];
@@ -47,7 +51,7 @@ function isLookingAtScreen(landmarks: Array<{ x: number; y: number; z: number }>
   if (!nose || !leftEar || !rightEar) return false;
 
   const faceWidth = Math.abs(rightEar.x - leftEar.x);
-  if (faceWidth < 0.001) return false; // avoid division by near-zero
+  if (faceWidth < 0.001) return false;
   const noseOffset = nose.x - (leftEar.x + rightEar.x) / 2;
   const yawRatio = noseOffset / faceWidth;
   return Math.abs(yawRatio) < 0.3;
@@ -56,9 +60,6 @@ function isLookingAtScreen(landmarks: Array<{ x: number; y: number; z: number }>
 // ─── Initialisation ───────────────────────────────────────
 async function init() {
   // MediaPipe Face Landmarker
-  const vision = await import('@mediapipe/tasks-vision');
-  const { FaceLandmarker, FilesetResolver } = vision;
-
   const filesetResolver = await FilesetResolver.forVisionTasks(
     'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm',
   );
@@ -75,11 +76,8 @@ async function init() {
     outputFacialTransformationMatrixes: false,
   });
 
-  // face-api.js — load models from /public/models/
-  // Note: face-api.js needs to be loaded via importScripts or dynamic import
-  // depending on build. For Vite worker with ES modules:
+  // face-api.js — load models from /models (served from public/models/)
   try {
-    const faceapi = await import('face-api.js');
     const modelPath = '/models';
     await Promise.all([
       faceapi.nets.tinyFaceDetector.loadFromUri(modelPath),
@@ -113,13 +111,12 @@ async function processFrame(
   // 2) face-api.js emotion
   if (faceApiReady && isPresent) {
     try {
-      const faceapi = await import('face-api.js');
       const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
       const ctx = canvas.getContext('2d');
       if (ctx) {
         ctx.drawImage(bitmap, 0, 0);
         const detection = await faceapi
-          .detectSingleFace(canvas as any, new faceapi.TinyFaceDetectorOptions())
+          .detectSingleFace(canvas as unknown as HTMLCanvasElement, new faceapi.TinyFaceDetectorOptions())
           .withFaceExpressions();
         if (detection) {
           emotion = mapExpression(detection.expressions as unknown as Record<string, number>);

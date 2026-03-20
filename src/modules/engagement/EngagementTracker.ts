@@ -51,10 +51,19 @@ export class EngagementTracker {
 
   async start(videoElement: HTMLVideoElement): Promise<void> {
     // 1) Camera permission
-    this.stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
-      audio: false, // mic is handled by SpeechCapture via its own permission
-    });
+    // Try front camera first; fall back to any available camera (handles Android devices
+    // where facingMode: 'user' throws NotFoundError if the front camera is unavailable)
+    try {
+      this.stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+        audio: false,
+      });
+    } catch {
+      this.stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 640 }, height: { ideal: 480 } },
+        audio: false,
+      });
+    }
     videoElement.srcObject = this.stream;
     await videoElement.play();
 
