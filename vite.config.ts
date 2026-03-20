@@ -14,10 +14,14 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': {
-        target: process.env.VITE_LLM_API_URL || 'https://api.openai.com',
+      '/api/chat': {
+        target: process.env.VITE_LLM_API_URL || 'https://YOUR_RESOURCE.openai.azure.com',
         changeOrigin: true,
-        rewrite: (p) => p.replace(/^\/api/, ''),
+        rewrite: () => {
+          const deployment = process.env.VITE_LLM_DEPLOYMENT || 'gpt-4o';
+          const apiVersion = process.env.VITE_LLM_API_VERSION || '2024-12-01-preview';
+          return `/openai/deployments/${deployment}/chat/completions?api-version=${apiVersion}`;
+        },
       },
     },
   },

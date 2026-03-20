@@ -25,11 +25,13 @@ ${JSON.stringify(payload.multimodal_transcript, null, 2)}
  * to generate a teacher observation report in Markdown.
  */
 export async function generateReport(payload: SessionPayload): Promise<string> {
-  const response = await fetch('/api/v1/chat/completions', {
+  const response = await fetch('/api/chat', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'api-key': import.meta.env.VITE_LLM_API_KEY,
+    },
     body: JSON.stringify({
-      model: import.meta.env.VITE_LLM_MODEL || 'gpt-4o',
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: buildUserPrompt(payload) },
