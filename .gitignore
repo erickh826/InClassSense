@@ -1,0 +1,20 @@
+# env
+.env
+.env.local
+
+# deps
+node_modules/
+
+# build
+dist/
+
+# IDE
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# models (downloaded at runtime)
+public/models/

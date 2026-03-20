@@ -1,0 +1,21 @@
+:root {
+  font-family: "Noto Sans TC", system-ui, -apple-system, sans-serif;
+  color: #213547;
+  background-color: #f8f9fa;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  min-height: 100dvh;
+}
+
+#root {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1rem;
+}
