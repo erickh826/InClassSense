@@ -58,16 +58,29 @@ export class SpeechCapture {
     };
 
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-      // 'no-speech' is normal, don't treat it as fatal
-      if (event.error !== 'no-speech') {
+      // 'no-speech' and 'aborted' are normal — browser stops after silence or
+      // when we manually stop; the onend handler will restart if still running.
+      const ignorable = ['no-speech', 'aborted'];
+      if (!ignorable.includes(event.error)) {
         this.events.onError(`SpeechRecognition error: ${event.error}`);
       }
     };
 
-    // Auto-restart on end (browser may stop after silence)
+    // Auto-restart on end.
+    // Android Chrome stops recognition after ~5s of silence or after each utterance.
+    // We restart with a small delay to avoid a tight restart loop that causes
+    // "aborted" errors when stop() races with the auto-restart.
     recognition.onend = () => {
       if (this.running) {
-        recognition.start();
+        setTimeout(() => {
+          if (this.running) {
+            try {
+              recognition.start();
+            } catch {
+              // InvalidStateError: recognition already started — safe to ignore
+            }
+          }
+        }, 150);
       }
     };
 
@@ -78,8 +91,13 @@ export class SpeechCapture {
   }
 
   stop(): void {
+    // Set running = false FIRST so the onend setTimeout won't restart
     this.running = false;
-    this.recognition?.stop();
+    try {
+      this.recognition?.stop();
+    } catch {
+      // InvalidStateError if recognition already stopped — safe to ignore
+    }
     this.recognition = null;
   }
 

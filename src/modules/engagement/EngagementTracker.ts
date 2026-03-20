@@ -64,7 +64,22 @@ export class EngagementTracker {
         audio: false,
       });
     }
+    // On Android, setting srcObject triggers an internal load. We must wait for
+    // the 'canplay' event before calling play(), otherwise we get:
+    // "AbortError: The play() request was interrupted by a new load request"
     videoElement.srcObject = this.stream;
+    await new Promise<void>((resolve) => {
+      const onCanPlay = () => {
+        videoElement.removeEventListener('canplay', onCanPlay);
+        resolve();
+      };
+      videoElement.addEventListener('canplay', onCanPlay);
+      // If already ready, resolve immediately
+      if (videoElement.readyState >= videoElement.HAVE_ENOUGH_DATA) {
+        videoElement.removeEventListener('canplay', onCanPlay);
+        resolve();
+      }
+    });
     await videoElement.play();
 
     // 2) Init vision worker (loads MediaPipe + face-api models)
