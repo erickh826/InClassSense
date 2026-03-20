@@ -29,7 +29,6 @@ export async function generateReport(payload: SessionPayload): Promise<string> {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'api-key': import.meta.env.VITE_LLM_API_KEY,
     },
     body: JSON.stringify({
       messages: [

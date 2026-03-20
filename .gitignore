@@ -16,5 +16,8 @@ dist/
 .DS_Store
 Thumbs.db
 
-# models (downloaded at runtime)
-public/models/
+# models are committed to the repo (required for Vercel deployment)
+# public/models/
+
+# TypeScript build info
+*.tsbuildinfo

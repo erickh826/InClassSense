@@ -1,10 +1,8 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  readonly VITE_LLM_API_URL: string;
-  readonly VITE_LLM_API_KEY: string;
-  readonly VITE_LLM_DEPLOYMENT: string;
-  readonly VITE_LLM_API_VERSION: string;
+  // No LLM variables exposed to the client — they are server-side only.
+  // See /api/chat.ts for the Vercel serverless proxy that reads them.
 }
 
 interface ImportMeta {

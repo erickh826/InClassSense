@@ -60,7 +60,7 @@ async function init() {
   const { FaceLandmarker, FilesetResolver } = vision;
 
   const filesetResolver = await FilesetResolver.forVisionTasks(
-    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm',
+    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm',
   );
 
   faceLandmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
