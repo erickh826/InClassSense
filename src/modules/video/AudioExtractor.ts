@@ -30,10 +30,17 @@ export async function extractAudioChunks(
   const arrayBuffer = await file.arrayBuffer();
   onProgress?.(5);
 
-  // 2. Decode with AudioContext
-  const audioCtx = new AudioContext();
-  const decoded = await audioCtx.decodeAudioData(arrayBuffer);
-  await audioCtx.close();
+  // 2. Decode with a short-lived AudioContext (required to get native duration/sampleRate)
+  //    Then resample to mono 16 kHz via OfflineAudioContext.
+  //    We use a one-shot AudioContext just for decodeAudioData because
+  //    OfflineAudioContext cannot decode raw compressed audio directly.
+  const tmpCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+  let decoded: AudioBuffer;
+  try {
+    decoded = await tmpCtx.decodeAudioData(arrayBuffer);
+  } finally {
+    await tmpCtx.close().catch(() => {});
+  }
   onProgress?.(20);
 
   // 3. Resample to mono 16 kHz via OfflineAudioContext
