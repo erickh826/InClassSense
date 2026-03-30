@@ -19,12 +19,20 @@ const PRESET_PROMPTS: PresetPrompt[] = [
     output: '分析學生的參與度、情緒變化及老師互動技巧，提供具體改善建議',
     lang: 'zh-TW',
   },
-  {
-    label: 'IELTS 口試練習',
-    input: 'IELTS Speaking test practice, candidate responding in English',
-    output: 'Evaluate fluency, vocabulary range, grammar accuracy, coherence, and pronunciation. Provide band score estimate and improvement tips.',
-    lang: 'en-US',
-  },
+ {
+  label: 'IELTS 口試練習',
+  input: `Act as a certified IELTS Speaking Examiner. Evaluate the following candidate response based on the official 4 criteria. Be strict and objective.
+
+1. Fluency and Coherence: Check for self-correction, hesitation (language vs. content), and use of discourse markers.
+2. Lexical Resource: Identify less common vocabulary, idiomatic expressions, and collocation errors.
+3. Grammatical Range and Accuracy: Look for complex sentence structures and systematic errors (e.g., tense consistency or articles).
+4. Pronunciation: Assess intonation, word stress, and individual sound clarity.`,
+  output: `- Table: Band score per criterion.
+- Detailed Feedback: Bullet points for "Strengths" and "Specific Errors."
+- The "Upgrade" Section: Rewrite 2-3 of the candidate's sentences into a Band 8.5/9.0 level version.
+- Overall Band Score & 3 Actionable Improvement Tips.`,
+  lang: 'en-US',
+},
   {
     label: '大學實習生面試',
     input: '大學生參加初級職位模擬面試，普通話或廣東話作答',
