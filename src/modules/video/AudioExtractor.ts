@@ -12,7 +12,10 @@
  *   4. Return the array of Blobs with their start-offset in the original video.
  */
 
-const CHUNK_DURATION_S = 15; // seconds per Azure REST segment
+// OPT-D: 30s chunks halve the number of Azure Speech API calls vs the original 15s.
+// Azure Speech real-time REST supports up to 60s segments; 30s is a good balance
+// between call overhead and parallelisation granularity.
+const CHUNK_DURATION_S = 30; // seconds per Azure REST segment
 
 export interface AudioChunk {
   blob: Blob;

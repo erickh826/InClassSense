@@ -40,16 +40,19 @@ const PRESET_PROMPTS: PresetPrompt[] = [
 ];
 
 // ─── Progress display ─────────────────────────────────────────────────────────
+// Phases 'frames' and 'audio' now run in PARALLEL (OPT-A).
+// The progress bar shows a merged "提取" step until both finish, then proceeds.
 
 const PHASE_LABEL: Record<PipelinePhase, string> = {
-  frames:     '提取視頻幀',
-  audio:      '提取音頻',
+  frames:     '提取視頻幀 + 音頻',
+  audio:      '提取視頻幀 + 音頻',
   transcribe: '語音識別',
   report:     '生成報告',
   done:       '完成',
 };
 
-const PHASE_ORDER: PipelinePhase[] = ['frames', 'audio', 'transcribe', 'report'];
+// Displayed as 3 steps (frames+audio merged, transcribe, report)
+const PHASE_ORDER: PipelinePhase[] = ['frames', 'transcribe', 'report'];
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -80,9 +83,12 @@ export function VideoUploadPage({ config, onBack }: VideoUploadPageProps) {
   const [phaseLabel, setPhaseLabel] = useState('');
   const [phasePct, setPhasePct]   = useState(0);
 
-  // Overall progress bar: each phase contributes 25%
-  const overallPct =
-    PHASE_ORDER.indexOf(phase) * 25 + Math.round(phasePct * 0.25);
+  // Overall progress bar: 3 displayed steps (frames+audio, transcribe, report) = 33% each
+  // Map 'audio' → same slot as 'frames' since they run in parallel
+  const displayPhase: PipelinePhase = phase === 'audio' ? 'frames' : phase;
+  const stepIdx = PHASE_ORDER.indexOf(displayPhase);
+  const overallPct = stepIdx < 0 ? 100
+    : Math.min(99, stepIdx * 33 + Math.round(phasePct * 0.33));
 
   const handlePresetClick = (index: number) => {
     setSelectedPreset(index);
@@ -311,13 +317,13 @@ export function VideoUploadPage({ config, onBack }: VideoUploadPageProps) {
           </div>
           <p className="video-progress-label">{phaseLabel}</p>
 
-          {/* Phase steps */}
+          {/* Phase steps — 3 displayed steps (frames+audio merged, transcribe, report) */}
           <div className="video-phase-steps">
             {PHASE_ORDER.map((p) => {
-              const idx   = PHASE_ORDER.indexOf(p);
-              const cur   = PHASE_ORDER.indexOf(phase);
-              const done  = idx < cur || (p === phase && phasePct === 100);
-              const active = p === phase && phasePct < 100;
+              const idx     = PHASE_ORDER.indexOf(p);
+              const curIdx  = PHASE_ORDER.indexOf(displayPhase);
+              const done    = idx < curIdx || (p === displayPhase && phasePct === 100);
+              const active  = p === displayPhase && phasePct < 100;
               return (
                 <div key={p} className={`video-phase-step ${done ? 'done' : ''} ${active ? 'active' : ''}`}>
                   <span className="video-phase-dot">{done ? '✓' : idx + 1}</span>
