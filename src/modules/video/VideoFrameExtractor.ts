@@ -31,11 +31,13 @@ export class VideoFrameExtractor {
     this.worker  = worker;
     this.objectUrl = URL.createObjectURL(file);
 
-    // Hidden video element — never appended to DOM
+    // Hidden video element — must be in DOM for seek events to fire on all browsers
     this.videoEl = document.createElement('video');
     this.videoEl.preload  = 'auto';
     this.videoEl.muted    = true;
     this.videoEl.playsInline = true;
+    this.videoEl.style.cssText = 'position:fixed;width:1px;height:1px;opacity:0;pointer-events:none;left:-9999px';
+    document.body.appendChild(this.videoEl);
     this.videoEl.src      = this.objectUrl;
   }
 
@@ -51,7 +53,17 @@ export class VideoFrameExtractor {
   /** Seek to a specific time and return when the frame is decoded */
   private seekTo(time: number): Promise<void> {
     return new Promise((resolve) => {
-      this.videoEl.onseeked = () => resolve();
+      let resolved = false;
+      const done = () => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(fallback);
+        this.videoEl.onseeked = null;
+        resolve();
+      };
+      // Safety: if seeked doesn’t fire within 3s, continue anyway
+      const fallback = setTimeout(done, 3000);
+      this.videoEl.onseeked = done;
       this.videoEl.currentTime = time;
     });
   }
@@ -115,5 +127,8 @@ export class VideoFrameExtractor {
   dispose() {
     URL.revokeObjectURL(this.objectUrl);
     this.videoEl.src = '';
+    if (this.videoEl.parentNode) {
+      this.videoEl.parentNode.removeChild(this.videoEl);
+    }
   }
 }
