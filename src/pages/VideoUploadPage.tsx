@@ -117,13 +117,22 @@ export function VideoUploadPage({ config, onBack }: VideoUploadPageProps) {
     const worker = new VisionWorker();
     workerRef.current = worker;
 
-    // Wait for worker ready signal
+    // Send init message and wait for 'ready' signal
     await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('Vision worker init timeout')), 15000);
+      const timeout = setTimeout(() => reject(new Error('Vision worker init timeout (15s)')), 15000);
       worker.onmessage = (e) => {
-        if (e.data?.type === 'ready') { clearTimeout(timeout); resolve(); }
-        else if (e.data?.type === 'error') { clearTimeout(timeout); reject(new Error(e.data.error)); }
+        if (e.data?.type === 'ready') {
+          clearTimeout(timeout);
+          worker.onmessage = null;  // clear — VideoFrameExtractor uses addEventListener
+          resolve();
+        } else if (e.data?.type === 'error') {
+          clearTimeout(timeout);
+          worker.onmessage = null;
+          reject(new Error(e.data.error));
+        }
       };
+      // Must explicitly trigger init — worker does not auto-initialise
+      worker.postMessage({ type: 'init' });
     });
 
     try {
