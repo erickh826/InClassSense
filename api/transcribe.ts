@@ -23,15 +23,37 @@ import type { IncomingMessage } from 'node:http';
  */
 
 // Disable Vercel's built-in body parser — we read the raw stream ourselves.
+// NOTE: disabling bodyParser also disables Vercel's built-in 4.5 MB body size
+// guard, so we enforce our own cap in readRawBody() below.
 export const config = {
   api: { bodyParser: false },
 };
 
-/** Collect all chunks from a Node.js IncomingMessage stream into a single Buffer. */
-function readRawBody(req: IncomingMessage): Promise<Buffer> {
+// [SECURITY] Body size cap — matches Vercel's default guard.
+// Our 30s WAV chunks are ~0.92 MB, so 5 MB gives ample headroom while
+// preventing unbounded memory allocation from oversized requests.
+const MAX_BODY_BYTES = 5 * 1024 * 1024; // 5 MB
+
+// [SECURITY] Language code allowlist — prevents query-parameter injection.
+// Accepts BCP-47 tags: zh-TW, en-US, ja-JP, zh-CN, en-GB, etc.
+const ALLOWED_LANG_RE = /^[a-zA-Z]{2,3}(-[a-zA-Z]{2,4})?$/;
+
+/**
+ * Collect all chunks from a Node.js IncomingMessage stream into a single Buffer.
+ * Rejects immediately if the incoming body exceeds maxBytes.
+ */
+function readRawBody(req: IncomingMessage, maxBytes = MAX_BODY_BYTES): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    let received = 0;
+    req.on('data', (chunk: Buffer) => {
+      received += chunk.length;
+      if (received > maxBytes) {
+        req.destroy();
+        return reject(new Error(`Request body exceeds ${maxBytes} bytes`));
+      }
+      chunks.push(chunk);
+    });
     req.on('end', () => resolve(Buffer.concat(chunks)));
     req.on('error', reject);
   });
@@ -49,7 +71,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: 'AZURE_SPEECH_KEY not configured' });
   }
 
-  const lang = (req.query.lang as string) || 'zh-TW';
+  // [SECURITY] Validate lang against a strict BCP-47 allowlist before
+  // interpolating into the upstream URL.  Rejects values like
+  // "zh-TW&format=simple" that would inject extra query parameters.
+  const rawLang = (req.query.lang as string) || 'zh-TW';
+  if (!ALLOWED_LANG_RE.test(rawLang)) {
+    return res.status(400).json({ error: 'Invalid language code' });
+  }
+  const lang = rawLang;
 
   // Forward the original Content-Type header; default to audio/wav
   const contentType = (req.headers['content-type'] as string) || 'audio/wav';
@@ -57,7 +86,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const endpoint =
     `https://${speechRegion}.stt.speech.microsoft.com` +
     `/speech/recognition/conversation/cognitiveservices/v1` +
-    `?language=${lang}&format=detailed&profanity=raw`;
+    `?language=${encodeURIComponent(lang)}&format=detailed&profanity=raw`;
 
   try {
     // Read the raw binary body from the stream (bodyParser is disabled above)
