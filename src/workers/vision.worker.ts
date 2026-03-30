@@ -65,8 +65,25 @@ let faceApiReady = false;
 /**
  * Map face-api.js expression labels → our EmotionTag.
  * face-api returns: neutral, happy, sad, angry, fearful, disgusted, surprised
+ *
+ * Priority rule:
+ * 1. happy ≥ HAPPY_THRESHOLD  → 'happy'   (checked first — smile can coexist with neutral dominance)
+ * 2. surprised is top label   → 'surprised'
+ * 3. fearful or sad is top    → 'confused'
+ * 4. otherwise               → 'neutral'
+ *
+ * HAPPY_THRESHOLD = 0.20: face-api often scores neutral 0.7–0.9 even when
+ * the person is clearly smiling. A happy score ≥ 0.20 is a reliable smile
+ * signal in interview/classroom contexts.
  */
+const HAPPY_THRESHOLD = 0.20;
+
 function mapExpression(expressions: Record<string, number>): EmotionTag {
+  // Priority: smile detection first — happy can score lower than neutral
+  // even when visually obvious, so apply a fixed threshold instead of argmax
+  if ((expressions['happy'] ?? 0) >= HAPPY_THRESHOLD) return 'happy';
+
+  // For remaining emotions use argmax
   let maxLabel = 'neutral';
   let maxScore = 0;
   for (const [label, score] of Object.entries(expressions)) {
@@ -76,8 +93,6 @@ function mapExpression(expressions: Record<string, number>): EmotionTag {
     }
   }
   switch (maxLabel) {
-    case 'happy':
-      return 'happy';
     case 'surprised':
       return 'surprised';
     case 'fearful':
