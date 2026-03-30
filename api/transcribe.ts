@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import type { IncomingMessage } from 'node:http';
 
 /**
  * Vercel serverless function — proxies audio to Azure AI Speech REST API.
@@ -15,7 +16,27 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
  *
  * Response:
  *   { text: string, words?: Array<{ word: string, offset_ms: number, duration_ms: number }> }
+ *
+ * IMPORTANT: bodyParser must be disabled so Vercel does not intercept the
+ * binary stream. Without this, req.body is an empty object {} for audio/wav
+ * content-type, causing Azure to return "No audio data received".
  */
+
+// Disable Vercel's built-in body parser — we read the raw stream ourselves.
+export const config = {
+  api: { bodyParser: false },
+};
+
+/** Collect all chunks from a Node.js IncomingMessage stream into a single Buffer. */
+function readRawBody(req: IncomingMessage): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method Not Allowed' });
@@ -30,8 +51,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const lang = (req.query.lang as string) || 'zh-TW';
 
-  // Determine content type — forward what the client sent, default to webm
-  const contentType = (req.headers['content-type'] as string) || 'audio/webm;codecs=opus';
+  // Forward the original Content-Type header; default to audio/wav
+  const contentType = (req.headers['content-type'] as string) || 'audio/wav';
 
   const endpoint =
     `https://${speechRegion}.stt.speech.microsoft.com` +
@@ -39,8 +60,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     `?language=${lang}&format=detailed&profanity=raw`;
 
   try {
-    // req.body is a Buffer when Vercel receives binary content-type
-    const audioBuffer: Buffer = req.body;
+    // Read the raw binary body from the stream (bodyParser is disabled above)
+    const audioBuffer = await readRawBody(req);
+
+    if (audioBuffer.length === 0) {
+      return res.status(400).json({ error: 'Empty audio body received' });
+    }
 
     const upstream = await fetch(endpoint, {
       method: 'POST',
