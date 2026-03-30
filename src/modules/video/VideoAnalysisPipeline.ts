@@ -167,11 +167,21 @@ async function transcribeChunk(
         utterances: wordsToUtterances(words, frames, input.startSec),
       };
     } else if (data.text) {
-      const mm = String(Math.floor(input.startSec / 60)).padStart(2, '0');
-      const ss = String(Math.floor(input.startSec % 60)).padStart(2, '0');
+      // BUG-1 FIX: fallback path (no word timestamps) must also resolve
+      // emotion_context from the nearest frame, just like buildUtterance does.
+      const startMs = input.startSec * 1000;
+      const mm = String(Math.floor(startMs / 60000)).padStart(2, '0');
+      const ss = String(Math.floor((startMs % 60000) / 1000)).padStart(2, '0');
+      let emotionContext: EngagementFrame['emotion'] | undefined;
+      if (frames.length > 0) {
+        const closest = frames.reduce((prev, cur) =>
+          Math.abs(cur.timestamp_ms - startMs) < Math.abs(prev.timestamp_ms - startMs) ? cur : prev,
+        );
+        emotionContext = closest.emotion;
+      }
       return {
         index: input.index,
-        utterances: [{ time: `${mm}:${ss}`, speaker: 'Student', text: data.text }],
+        utterances: [{ time: `${mm}:${ss}`, speaker: 'Student', text: data.text, emotion_context: emotionContext }],
       };
     }
     return { index: input.index, utterances: [] };
