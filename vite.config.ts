@@ -12,6 +12,18 @@ export default defineConfig({
   worker: {
     format: 'es',
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // Prefix all asset filenames with 'v3.' to prevent browser cache
+        // collisions with demoV2 (in-class-sense-xi.vercel.app), which shares
+        // the same content-based hashes for unchanged files.
+        assetFileNames: 'assets/v3.[name]-[hash][extname]',
+        chunkFileNames: 'assets/v3.[name]-[hash].js',
+        entryFileNames: 'assets/v3.[name]-[hash].js',
+      },
+    },
+  },
   server: {
     proxy: {
       '/api/chat': {
