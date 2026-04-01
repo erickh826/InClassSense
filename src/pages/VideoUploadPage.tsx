@@ -15,12 +15,6 @@ interface PresetPrompt {
 
 const PRESET_PROMPTS: PresetPrompt[] = [
   {
-    label: '幼稚園課堂',
-    input: '幼稚園課堂活動，教學語言廣東話，學生年齡 3–6 歲',
-    output: '分析學生的參與度、情緒變化及老師互動技巧，提供具體改善建議',
-    lang: 'zh-TW',
-  },
-  {
     label: 'IELTS 口試練習',
     input: 'IELTS Speaking test practice, candidate responding in English',
     output: 'Evaluate fluency, vocabulary range, grammar accuracy, coherence, and pronunciation. Provide band score estimate and improvement tips.',
@@ -218,9 +212,6 @@ export function VideoUploadPage({ config, onBack }: VideoUploadPageProps) {
     <div className="session-runner">
       {/* Header */}
       <div className="session-header">
-        <button className="back-btn" onClick={onBack} disabled={state === 'analysing'}>
-          ← 返回
-        </button>
         <div className="session-title-row">
           <span className="session-icon">{config.icon}</span>
           <div>
@@ -275,7 +266,7 @@ export function VideoUploadPage({ config, onBack }: VideoUploadPageProps) {
           <label className="video-field-label">📥 輸入背景（影片內容說明）</label>
           <textarea
             className="text-input textarea-input"
-            placeholder="例如：幼稚園課堂，教學語言廣東話..."
+            placeholder="例如：中學課堂，教學語言廣東話..."
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
             disabled={!isIdle}
