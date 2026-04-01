@@ -392,10 +392,10 @@ export function VideoUploadPage({ config, onBack }: VideoUploadPageProps) {
       {activeTab === 'youtube' && (
         <>
           {/* Privacy notice */}
-          <div className="youtube-notice">
+          {/* <div className="youtube-notice">
             <span className="youtube-notice-icon">ℹ️</span>
-           {/*  <span>影片分析由 Gemini AI 處理，影片內容會傳送至 Google 伺服器。本地上傳模式的影片數據只在瀏覽器內處理。</span>*/}
-          </div>
+             <span>影片分析由 Gemini AI 處理，影片內容會傳送至 Google 伺服器。本地上傳模式的影片數據只在瀏覽器內處理。</span>
+          </div> */}
 
           {/* URL input */}
           {isIdle && (
