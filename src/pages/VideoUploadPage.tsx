@@ -14,12 +14,13 @@ interface PresetPrompt {
 }
 
 const PRESET_PROMPTS: PresetPrompt[] = [
+  
   {
-    label: '語言練習評估',
-    input: 'IELTS Speaking test practice, candidate responding in English',
-    output: 'Evaluate fluency, vocabulary range, grammar accuracy, coherence, and pronunciation. Provide band score estimate and improvement tips.',
-    lang: 'en-US',
-  },
+    label: '面試',
+    input: '大學生參加初級職位模擬面試，普通話或廣東話作答',
+    output: '分析表達能力、回答邏輯、態度自信程度及可改善的溝通技巧',
+    lang: 'zh-TW',
+  }
 
 ];
 
@@ -393,7 +394,7 @@ export function VideoUploadPage({ config, onBack }: VideoUploadPageProps) {
           {/* Privacy notice */}
           {/* <div className="youtube-notice">
             <span className="youtube-notice-icon">ℹ️</span>
-           {/* <span>影片分析由 Gemini AI 處理，影片內容會傳送至 Google 伺服器。本地上傳模式的影片數據只在瀏覽器內處理。</span>*/}
+             <span>影片分析由 Gemini AI 處理，影片內容會傳送至 Google 伺服器。本地上傳模式的影片數據只在瀏覽器內處理。</span>
           </div> */}
 
           {/* URL input */}
