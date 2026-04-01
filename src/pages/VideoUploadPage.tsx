@@ -15,12 +15,12 @@ interface PresetPrompt {
 
 const PRESET_PROMPTS: PresetPrompt[] = [
   
-  {
-    label: '面試',
-    input: '大學生參加初級職位模擬面試，普通話或廣東話作答',
-    output: '分析表達能力、回答邏輯、態度自信程度及可改善的溝通技巧',
-    lang: 'zh-TW',
-  }
+   {
+    label: '語言練習評估',
+    input: 'IELTS Speaking test practice, candidate responding in English',
+    output: 'Evaluate fluency, vocabulary range, grammar accuracy, coherence, and pronunciation. Provide band score estimate and improvement tips.',
+    lang: 'en-US',
+  },
 
 ];
 
