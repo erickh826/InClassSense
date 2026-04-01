@@ -1,4 +1,4 @@
-# InClassSense — 多模態 AI 觀察與評估平台 V2
+# InClassSense — 多模態 AI 觀察與評估平台 V3
 
 Browser-based multimodal AI observation platform for educators. Captures verbal responses and non-verbal cues (attention, emotion) via camera and microphone — all processed locally on-device — then generates structured assessment reports via LLM.
 
