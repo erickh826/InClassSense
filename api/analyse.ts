@@ -3,9 +3,10 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 // ── Body parser must be disabled — we read raw JSON ourselves ──────────────
 export const config = { api: { bodyParser: false } };
 
-// ── Security: allowed YouTube URL pattern ─────────────────────────────────
+// ── Security: allowed YouTube URL pattern ────────────────────────────────// Supports: www/m.youtube.com/watch, youtu.be, youtube.com/shorts
+// Server-side trim is applied before this check to handle Windows paste trailing whitespace/CRLF
 const YOUTUBE_RE =
-  /^https:\/\/(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)[\w-]{11}([&?][\w=&%-]*)?$/i;
+  /^https:\/\/(www\.|m\.)?(youtube\.com\/(watch\?v=|shorts\/)|youtu\.be\/)[\w-]{11}([&?][\w=&%-]*)?$/i;
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -15,7 +16,12 @@ async function readJsonBody(req: VercelRequest): Promise<unknown> {
     req.setEncoding('utf8');
     req.on('data', (chunk: string) => { raw += chunk; });
     req.on('end', () => {
-      try { resolve(JSON.parse(raw)); }
+      try {
+        // Strip UTF-8 BOM (\uFEFF) that Windows browsers may prepend,
+        // and trim surrounding whitespace/CRLF before parsing.
+        const cleaned = raw.replace(/^\uFEFF/, '').trim();
+        resolve(JSON.parse(cleaned));
+      }
       catch { reject(new Error('Invalid JSON body')); }
     });
     req.on('error', reject);
@@ -67,7 +73,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'Invalid request body' });
   }
 
-  const { youtubeUrl, inputContext = '', outputFocus = '' } = body;
+  const { youtubeUrl: rawUrl, inputContext = '', outputFocus = '' } = body;
+  // Trim server-side to handle Windows browsers that may paste URLs with
+  // trailing whitespace, newlines (\n), or carriage returns (\r\n).
+  const youtubeUrl = (rawUrl ?? '').trim();
 
   if (!youtubeUrl) return res.status(400).json({ error: 'youtubeUrl is required' });
   if (!YOUTUBE_RE.test(youtubeUrl)) {
