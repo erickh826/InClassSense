@@ -15,10 +15,10 @@ interface PresetPrompt {
 
 const PRESET_PROMPTS: PresetPrompt[] = [
   
-   {
-    label: '語言練習評估',
-    input: 'IELTS Speaking test practice, candidate responding in English',
-    output: 'Evaluate fluency, vocabulary range, grammar accuracy, coherence, and pronunciation. Provide band score estimate and improvement tips.',
+  {
+    label: '英語口語評估',
+    input: 'English speaking practice or conversation. The speaker is practising spoken English.',
+    output: 'Assess the speaker\'s overall spoken English ability. Identify clear strengths, weaknesses, and provide actionable improvement suggestions. Do NOT give any numerical score or band score.',
     lang: 'en-US',
   },
 
