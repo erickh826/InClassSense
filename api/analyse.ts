@@ -8,7 +8,31 @@ export const config = { api: { bodyParser: false } };
 // Supports: www/m.youtube.com/watch, youtu.be, youtube.com/shorts
 // Server-side trim is applied before this check to handle Windows paste trailing whitespace/CRLF
 const YOUTUBE_RE =
-  /^https:\/\/(www\.|m\.)?(youtube\.com\/(watch\?v=|shorts\/)|youtu\.be\/)[\w-]{11}([&?][\w=&%-]*)?$/i;
+  /^https:\/\/(www\.|m\.)?(youtube\.com\/(watch\?v=|shorts\/)|youtu\.be\/)[\w-]{11}([&?][\w=&%.,:-]*)?$/i;
+
+// ── URL normalisation ──────────────────────────────────────────────────────
+// Extract the bare video ID and return a canonical clean URL.
+// Strips &t=, &ab_channel=, &list= and all other extra params that cause
+// Gemini to return INVALID_ARGUMENT (400).
+function normaliseYoutubeUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    const isShort = u.hostname === 'youtu.be';
+    const isShorts = u.pathname.startsWith('/shorts/');
+    let videoId: string;
+    if (isShort) {
+      videoId = u.pathname.slice(1).replace(/[^\w-]/g, '');
+    } else if (isShorts) {
+      videoId = u.pathname.replace('/shorts/', '').replace(/[^\w-]/g, '');
+    } else {
+      videoId = u.searchParams.get('v') ?? '';
+    }
+    if (!videoId) return url; // fallback: send as-is
+    return `https://www.youtube.com/watch?v=${videoId}`;
+  } catch {
+    return url;
+  }
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -54,6 +78,9 @@ ${outputFocus || '（未提供輸出要求）'}
 - 結尾提供總結評分（1–10 分）及整體建議`;
 }
 
+// ── Retry helper ───────────────────────────────────────────────────────────
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 // ── Handler ────────────────────────────────────────────────────────────────
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -85,40 +112,68 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'Invalid YouTube URL format' });
   }
 
+  // Strip timestamp/extra params — Gemini 400s on URLs like ?v=xxx&t=1s
+  const cleanUrl = normaliseYoutubeUrl(youtubeUrl);
+  console.log(`[analyse] normalised URL: ${youtubeUrl} → ${cleanUrl}`);
+
   const prompt = buildPrompt(inputContext, outputFocus);
   const modelName = process.env.GEMINI_API_MODEL || 'gemini-2.5-pro';
 
-  try {
-    // ── Use official @google/genai SDK (GA since May 2025) ─────────────────
-    const ai = new GoogleGenAI({ apiKey });
+  // ── Use official @google/genai SDK (GA since May 2025) ─────────────────
+  // Gemini intermittently returns transient 400s for YouTube URLs (known issue).
+  // Retry up to MAX_RETRIES times with exponential backoff before giving up.
+  const MAX_RETRIES = 3;
+  const RETRY_DELAYS_MS = [1000, 2500, 5000];
+  let lastErr = '';
 
-    const response = await ai.models.generateContent({
-      model: modelName,
-      contents: [
-        {
-          parts: [
-            { fileData: { mimeType: 'video/mp4', fileUri: youtubeUrl } },
-            { text: prompt },
-          ],
-        },
-      ],
-      config: {
-        temperature: 0.4,
-        maxOutputTokens: 4096,
-      },
-    });
-
-    const text = response.text ?? '';
-
-    if (!text) {
-      return res.status(502).json({ error: 'Empty response from Gemini' });
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      console.log(`[analyse] retry attempt ${attempt} after ${RETRY_DELAYS_MS[attempt - 1]}ms`);
+      await sleep(RETRY_DELAYS_MS[attempt - 1]);
     }
+    try {
+      const ai = new GoogleGenAI({ apiKey });
 
-    return res.status(200).json({ report: text });
-  } catch (err: unknown) {
-    console.error('analyse handler error:', err);
-    // Surface structured SDK errors clearly
-    const message = err instanceof Error ? err.message : String(err);
-    return res.status(502).json({ error: `Gemini SDK error: ${message}` });
+      const response = await ai.models.generateContent({
+        model: modelName,
+        contents: [
+          {
+            parts: [
+              // mimeType must be 'video/*' (NOT 'video/mp4') for YouTube URLs.
+              // Using 'video/mp4' causes INVALID_ARGUMENT on YouTube streams.
+              { fileData: { mimeType: 'video/*', fileUri: cleanUrl } },
+              { text: prompt },
+            ],
+          },
+        ],
+        config: {
+          temperature: 0.4,
+          maxOutputTokens: 4096,
+        },
+      });
+
+      const text = response.text ?? '';
+
+      if (!text) {
+        return res.status(502).json({ error: 'Empty response from Gemini' });
+      }
+
+      return res.status(200).json({ report: text });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[analyse] SDK error (attempt ${attempt + 1}):`, message);
+      lastErr = message;
+
+      // Only retry on errors that are likely transient (400/503 from Gemini)
+      const isTransient = message.includes('400') || message.includes('503') || message.includes('INVALID_ARGUMENT');
+      if (!isTransient) {
+        return res.status(502).json({ error: `Gemini SDK error: ${message}` });
+      }
+      // Otherwise fall through to retry
+    }
   }
+
+  // All retries exhausted
+  console.error('[analyse] all retries exhausted. Last error:', lastErr);
+  return res.status(502).json({ error: 'Gemini API failed after retries', detail: lastErr });
 }
