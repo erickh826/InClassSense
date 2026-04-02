@@ -1,3 +1,14 @@
+/**
+ * vision.worker.ts
+ *
+ * Runs MediaPipe FaceLandmarker in a Web Worker for per-frame engagement analysis.
+ *
+ * v2 changes (optimised vision stats):
+ *   1. numFaces raised from 1 → 4 (multi-person scenes)
+ *   2. outputFaceBlendshapes enabled — replaces face-api.js for emotion detection
+ *   3. Attention yawRatio threshold relaxed from 0.3 → 0.45 (interview context)
+ *   4. Multi-face aggregation: emotion = dominant across all faces; attention = any face looking
+ */
 import type { FaceLandmarker } from '@mediapipe/tasks-vision';
 import type { EmotionTag } from '../engagement/types';
 import type {
@@ -6,6 +17,7 @@ import type {
   EngagementFrame,
 } from '../engagement/types';
 
+// ─── MediaPipe WASM loader polyfill ───────────────────────
 // MediaPipe's `ta()` tries importScripts(), then `self.import()` for Emscripten glue (`*_internal.js`).
 // 1) `self.import` is not a browser API — we polyfill it.
 // 2) Real `import()` loads that file as an ES module, so `var ModuleFactory` never hits `self`
@@ -54,79 +66,77 @@ if (typeof w.import !== 'function') {
   };
 }
 
-// ─── MediaPipe Face Landmarker ────────────────────────────
-// Imported at runtime inside the worker context
+// ─── Constants ────────────────────────────────────────────
+const MAX_FACES = 4;
+const YAW_THRESHOLD = 0.45;
+
+// Blendshape thresholds (tuned for MediaPipe face_landmarker v1)
+const SMILE_THRESHOLD = 0.4;       // mouthSmileLeft + mouthSmileRight average
+const SURPRISE_THRESHOLD = 0.35;   // eyeWideLeft + eyeWideRight average
+const CONFUSED_THRESHOLD = 0.3;    // browDownLeft + browDownRight average (furrowed brows)
+
+// ─── State ────────────────────────────────────────────────
 let faceLandmarker: FaceLandmarker | null = null;
 
-// ─── face-api.js ──────────────────────────────────────────
-// face-api.js works with OffscreenCanvas in modern browsers
-let faceApiReady = false;
-
+// ─── Blendshape-based emotion detection ───────────────────
 /**
- * Map face-api.js expression labels → our EmotionTag.
- * face-api returns: neutral, happy, sad, angry, fearful, disgusted, surprised
+ * Maps MediaPipe blendshape coefficients to an EmotionTag.
  *
- * Priority rule:
- * 1. happy ≥ HAPPY_THRESHOLD  → 'happy'   (checked first — smile can coexist with neutral dominance)
- * 2. surprised is top label   → 'surprised'
- * 3. fearful or sad is top    → 'confused'
- * 4. otherwise               → 'neutral'
+ * Blendshape categories used:
+ *   - mouthSmileLeft, mouthSmileRight → happy
+ *   - eyeWideLeft, eyeWideRight → surprised
+ *   - browDownLeft, browDownRight → confused (furrowed brows)
  *
- * HAPPY_THRESHOLD = 0.20: face-api often scores neutral 0.7–0.9 even when
- * the person is clearly smiling. A happy score ≥ 0.20 is a reliable smile
- * signal in interview/classroom contexts.
+ * Priority: happy > surprised > confused > neutral
  */
-const HAPPY_THRESHOLD = 0.20;
-
-function mapExpression(expressions: Record<string, number>): EmotionTag {
-  // Priority: smile detection first — happy can score lower than neutral
-  // even when visually obvious, so apply a fixed threshold instead of argmax
-  if ((expressions['happy'] ?? 0) >= HAPPY_THRESHOLD) return 'happy';
-
-  // For remaining emotions use argmax
-  let maxLabel = 'neutral';
-  let maxScore = 0;
-  for (const [label, score] of Object.entries(expressions)) {
-    if (score > maxScore) {
-      maxScore = score;
-      maxLabel = label;
-    }
+function blendshapesToEmotion(
+  blendshapes: Array<{ categoryName: string; score: number }>,
+): EmotionTag {
+  const bs: Record<string, number> = {};
+  for (const b of blendshapes) {
+    bs[b.categoryName] = b.score;
   }
-  switch (maxLabel) {
-    case 'surprised':
-      return 'surprised';
-    case 'fearful':
-    case 'sad':
-      return 'confused';
-    default:
-      return 'neutral';
-  }
+
+  // Smile detection
+  const smileAvg =
+    ((bs['mouthSmileLeft'] ?? 0) + (bs['mouthSmileRight'] ?? 0)) / 2;
+  if (smileAvg >= SMILE_THRESHOLD) return 'happy';
+
+  // Surprise detection
+  const surpriseAvg =
+    ((bs['eyeWideLeft'] ?? 0) + (bs['eyeWideRight'] ?? 0)) / 2;
+  if (surpriseAvg >= SURPRISE_THRESHOLD) return 'surprised';
+
+  // Confused detection (furrowed brows)
+  const confusedAvg =
+    ((bs['browDownLeft'] ?? 0) + (bs['browDownRight'] ?? 0)) / 2;
+  if (confusedAvg >= CONFUSED_THRESHOLD) return 'confused';
+
+  return 'neutral';
 }
 
-// ─── Head pose attention (same logic as spec) ─────────────
-function isLookingAtScreen(landmarks: Array<{ x: number; y: number; z: number }>): boolean {
+// ─── Head pose attention ──────────────────────────────────
+function isLookingAtScreen(
+  landmarks: Array<{ x: number; y: number; z: number }>,
+): boolean {
   const nose = landmarks[1];
   const leftEar = landmarks[93];
   const rightEar = landmarks[323];
   if (!nose || !leftEar || !rightEar) return false;
-
   const faceWidth = Math.abs(rightEar.x - leftEar.x);
-  if (faceWidth < 0.001) return false; // avoid division by near-zero
+  if (faceWidth < 0.001) return false;
   const noseOffset = nose.x - (leftEar.x + rightEar.x) / 2;
   const yawRatio = noseOffset / faceWidth;
-  return Math.abs(yawRatio) < 0.3;
+  return Math.abs(yawRatio) < YAW_THRESHOLD;
 }
 
 // ─── Initialisation ───────────────────────────────────────
 async function init() {
-  // MediaPipe Face Landmarker
   const vision = await import('@mediapipe/tasks-vision');
   const { FaceLandmarker, FilesetResolver } = vision;
-
   const filesetResolver = await FilesetResolver.forVisionTasks(
     'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm',
   );
-
   faceLandmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
     baseOptions: {
       modelAssetPath:
@@ -134,29 +144,24 @@ async function init() {
       delegate: 'GPU',
     },
     runningMode: 'VIDEO',
-    numFaces: 1,
-    outputFaceBlendshapes: false,
+    numFaces: MAX_FACES,
+    outputFaceBlendshapes: true,
     outputFacialTransformationMatrixes: false,
   });
-
-  // face-api.js — load models from /public/models/
-  // Note: face-api.js needs to be loaded via importScripts or dynamic import
-  // depending on build. For Vite worker with ES modules:
-  try {
-    const faceapi = await import('face-api.js');
-    const modelPath = '/models';
-    await Promise.all([
-      faceapi.nets.tinyFaceDetector.loadFromUri(modelPath),
-      faceapi.nets.faceExpressionNet.loadFromUri(modelPath),
-    ]);
-    faceApiReady = true;
-  } catch (e) {
-    console.warn('[vision.worker] face-api.js load failed, emotion detection disabled:', e);
-    faceApiReady = false;
-  }
+  // face-api.js is no longer needed — blendshapes handle emotion detection
 }
 
-// ─── Per-frame processing ─────────────────────────────────
+// ─── Per-frame processing (multi-face aggregation) ────────
+/**
+ * Processes a single video frame and returns an aggregated EngagementFrame.
+ *
+ * Multi-face aggregation rules:
+ *   - is_present: true if ANY face is detected
+ *   - is_looking_at_screen: true if ANY face is looking at screen
+ *   - emotion: dominant non-neutral emotion across all faces;
+ *              priority: happy > surprised > confused > neutral
+ *              if no face detected → 'absent'
+ */
 async function processFrame(
   bitmap: ImageBitmap,
   timestampMs: number,
@@ -165,38 +170,49 @@ async function processFrame(
   let lookingAtScreen = false;
   let emotion: EmotionTag = 'absent';
 
-  // 1) MediaPipe head pose
   if (faceLandmarker) {
     const result = faceLandmarker.detectForVideo(bitmap, timestampMs);
-    if (result.faceLandmarks && result.faceLandmarks.length > 0) {
-      isPresent = true;
-      lookingAtScreen = isLookingAtScreen(result.faceLandmarks[0]);
-    }
-  }
+    const numDetected = result.faceLandmarks?.length ?? 0;
 
-  // 2) face-api.js emotion
-  if (faceApiReady && isPresent) {
-    try {
-      const faceapi = await import('face-api.js');
-      const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.drawImage(bitmap, 0, 0);
-        const detection = await faceapi
-          .detectSingleFace(canvas as any, new faceapi.TinyFaceDetectorOptions())
-          .withFaceExpressions();
-        if (detection) {
-          emotion = mapExpression(detection.expressions as unknown as Record<string, number>);
+    if (numDetected > 0) {
+      isPresent = true;
+
+      const faceEmotions: EmotionTag[] = [];
+
+      for (let i = 0; i < numDetected; i++) {
+        // Attention: any face looking at screen counts
+        if (result.faceLandmarks[i]) {
+          if (isLookingAtScreen(result.faceLandmarks[i])) {
+            lookingAtScreen = true;
+          }
+        }
+
+        // Emotion via blendshapes
+        if (result.faceBlendshapes && result.faceBlendshapes[i]) {
+          const categories = result.faceBlendshapes[i].categories;
+          if (categories && categories.length > 0) {
+            faceEmotions.push(blendshapesToEmotion(categories));
+          }
+        }
+      }
+
+      // Aggregate emotions with priority: happy > surprised > confused > neutral
+      if (faceEmotions.length > 0) {
+        if (faceEmotions.includes('happy')) {
+          emotion = 'happy';
+        } else if (faceEmotions.includes('surprised')) {
+          emotion = 'surprised';
+        } else if (faceEmotions.includes('confused')) {
+          emotion = 'confused';
         } else {
           emotion = 'neutral';
         }
+      } else {
+        emotion = 'neutral';
       }
-    } catch {
-      emotion = 'neutral';
     }
   }
 
-  // Release the bitmap
   bitmap.close();
 
   return {
@@ -246,7 +262,6 @@ self.onmessage = async (e: MessageEvent<VisionWorkerRequest>) => {
     case 'shutdown': {
       faceLandmarker?.close();
       faceLandmarker = null;
-      faceApiReady = false;
       self.close();
       break;
     }
