@@ -1,9 +1,11 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { GoogleGenAI } from '@google/genai';
 
 // ── Body parser must be disabled — we read raw JSON ourselves ──────────────
 export const config = { api: { bodyParser: false } };
 
-// ── Security: allowed YouTube URL pattern ────────────────────────────────// Supports: www/m.youtube.com/watch, youtu.be, youtube.com/shorts
+// ── Security: allowed YouTube URL pattern ─────────────────────────────────
+// Supports: www/m.youtube.com/watch, youtu.be, youtube.com/shorts
 // Server-side trim is applied before this check to handle Windows paste trailing whitespace/CRLF
 const YOUTUBE_RE =
   /^https:\/\/(www\.|m\.)?(youtube\.com\/(watch\?v=|shorts\/)|youtu\.be\/)[\w-]{11}([&?][\w=&%-]*)?$/i;
@@ -84,55 +86,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const prompt = buildPrompt(inputContext, outputFocus);
-
-  const geminiPayload = {
-    contents: [
-      {
-        parts: [
-          { fileData: { mimeType: 'video/mp4', fileUri: youtubeUrl } },
-          { text: prompt },
-        ],
-      },
-    ],
-    generationConfig: {
-      temperature: 0.4,
-      maxOutputTokens: 4096,
-    },
-  };
+  const modelName = process.env.GEMINI_API_MODEL || 'gemini-2.5-pro';
 
   try {
-    const model = process.env.GEMINI_API_MODEL || 'gemini-2.5-pro';
-    const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(geminiPayload),
+    // ── Use official @google/genai SDK (GA since May 2025) ─────────────────
+    const ai = new GoogleGenAI({ apiKey });
+
+    const response = await ai.models.generateContent({
+      model: modelName,
+      contents: [
+        {
+          parts: [
+            { fileData: { mimeType: 'video/mp4', fileUri: youtubeUrl } },
+            { text: prompt },
+          ],
+        },
+      ],
+      config: {
+        temperature: 0.4,
+        maxOutputTokens: 4096,
       },
-    );
+    });
 
-    if (!geminiRes.ok) {
-      const errText = await geminiRes.text();
-      console.error('Gemini API error:', geminiRes.status, errText);
-      return res.status(502).json({ error: `Gemini API error: ${geminiRes.status}`, detail: errText });
-    }
-
-    const data = await geminiRes.json() as {
-      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
-    };
-
-    const text =
-      data.candidates?.[0]?.content?.parts
-        ?.map((p) => p.text ?? '')
-        .join('') ?? '';
+    const text = response.text ?? '';
 
     if (!text) {
       return res.status(502).json({ error: 'Empty response from Gemini' });
     }
 
     return res.status(200).json({ report: text });
-  } catch (err) {
+  } catch (err: unknown) {
     console.error('analyse handler error:', err);
-    return res.status(500).json({ error: String(err) });
+    // Surface structured SDK errors clearly
+    const message = err instanceof Error ? err.message : String(err);
+    return res.status(502).json({ error: `Gemini SDK error: ${message}` });
   }
 }
