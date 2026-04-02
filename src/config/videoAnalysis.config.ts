@@ -36,14 +36,15 @@ export const videoAnalysisConfig: ModeConfig = {
     // When the vision worker fails or no face is detected, all stats are zero
     // AND no utterance has an emotion_context. In that case, show a clear
     // disclaimer instead of misleading the LLM with all-zero measurements.
-    const hasEmotionData = payload.multimodal_transcript.some(u => u.emotion_context != null);
-    const statsAreAllZero =
-      payload.engagement_stats.overall_attention_rate === 0 &&
-      payload.engagement_stats.smile_count === 0 &&
-      payload.engagement_stats.confused_count === 0 &&
-      payload.engagement_stats.surprised_count === 0 &&
-      payload.engagement_stats.absence_count === 0;
-    const visionAvailable = hasEmotionData || !statsAreAllZero;
+    // const hasEmotionData = payload.multimodal_transcript.some(u => u.emotion_context != null);
+     const hasEmotionData = null
+    // const statsAreAllZero =
+    //   payload.engagement_stats.overall_attention_rate === 0 &&
+    //   payload.engagement_stats.smile_count === 0 &&
+    //   payload.engagement_stats.confused_count === 0 &&
+    //   payload.engagement_stats.surprised_count === 0 &&
+    //   payload.engagement_stats.absence_count === 0;
+    const visionAvailable = hasEmotionData  //|| !statsAreAllZero;
 
     // BUG-2 FIX: Only include 情緒 in the transcript section header when
     // emotion_context values are actually present in the data.
