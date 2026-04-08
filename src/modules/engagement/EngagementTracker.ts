@@ -84,7 +84,7 @@ export class EngagementTracker {
     });
     await videoElement.play();
 
-    // 2) Init vision worker (loads MediaPipe + face-api models)
+    // 2) Init vision worker (loads MediaPipe FaceLandmarker with blendshapes)
     await this.headPose.init();
 
     // 3) Start frame loop

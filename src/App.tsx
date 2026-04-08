@@ -1,30 +1,12 @@
-import { useState } from 'react';
-import { LandingPage } from './pages/LandingPage';
-import { SessionRunner } from './pages/SessionRunner';
 import { VideoUploadPage } from './pages/VideoUploadPage';
-import type { ModeConfig } from './config/types';
+import { videoAnalysisConfig } from './config';
 
+// demoV2: Launch directly into 影片分析 — no landing page or mode selection
 export default function App() {
-  const [activeMode, setActiveMode] = useState<ModeConfig | null>(null);
-
-  if (activeMode) {
-    // Video analysis mode gets its own dedicated page
-    if (activeMode.id === 'video-analysis') {
-      return (
-        <VideoUploadPage
-          config={activeMode}
-          onBack={() => setActiveMode(null)}
-        />
-      );
-    }
-
-    return (
-      <SessionRunner
-        config={activeMode}
-        onBack={() => setActiveMode(null)}
-      />
-    );
-  }
-
-  return <LandingPage onSelect={(mode) => setActiveMode(mode)} />;
+  return (
+    <VideoUploadPage
+      config={videoAnalysisConfig}
+      onBack={() => {}}
+    />
+  );
 }
